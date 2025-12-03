@@ -1,0 +1,19 @@
+# 実行ファイル (Windows, Mac/Linux)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+main
+
+# 環境変数ファイル (重要！)
+.env
+.env.local
+
+# テスト結果など
+*.out
+vendor/
+
+# エディタ設定
+.vscode/
+.idea/
