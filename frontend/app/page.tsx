@@ -17,26 +17,24 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string>("");
 
-  // 初回読み込み時に投稿一覧を取得
   useEffect(() => {
-    fetchPosts();
-  }, []);
+    const fetchPosts = async () => {
+      try {
+        const res = await axios.get("http://localhost:8080/api/posts");
+        setPosts(res.data);
+      } catch (err) {
+        console.error("データの取得に失敗しました", err);
+      }
+    };
 
-  const fetchPosts = async () => {
-    try {
-      const res = await axios.get("http://localhost:8080/api/posts");
-      setPosts(res.data);
-    } catch (err) {
-      console.error("データの取得に失敗しました", err);
-    }
-  };
+    fetchPosts();
+  }, []); // [] 初回のみ実行される
 
   // 画像ファイルが選択された時の処理
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       setFile(selectedFile);
-      // プレビュー用のURLを作成
       setPreview(URL.createObjectURL(selectedFile));
     }
   };
@@ -59,7 +57,11 @@ export default function Home() {
       setCaption("");
       setFile(null);
       setPreview("");
-      fetchPosts(); // リストを再取得して画面更新
+
+      // 投稿後にリストを再取得（ここでも axios を直接呼ぶ）
+      const res = await axios.get("http://localhost:8080/api/posts");
+      setPosts(res.data);
+
       alert("投稿しました！");
     } catch (err) {
       console.error("投稿エラー", err);
@@ -68,11 +70,10 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-50 pb-20 bg-cover bg-center bg-fixed"
-  style={{ backgroundImage: "url('/flower.png')" }}>
+    <main className="min-h-screen bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 pb-20">
       {/* ヘッダー */}
       <nav className="bg-white border-b sticky top-0 z-10 p-4 flex justify-center shadow-sm">
-        <h1 className="text-2xl font-bold font-serif">PazooBlogs</h1>
+        <h1 className="text-2xl font-bold font-serif text-black">PazooBlogs</h1>
       </nav>
 
       <div className="max-w-2xl mx-auto pt-6 px-4">
@@ -83,11 +84,12 @@ export default function Home() {
             {/* プレビュー表示 */}
             {preview && (
               <div className="relative w-full h-48 bg-gray-100 rounded overflow-hidden">
-                {/* プレビューは通常のimgタグでOK */}
-                <img
-                  src={preview}
-                  alt="Preview"
-                  className="w-full h-full object-cover"
+                <Image 
+                  src={preview} 
+                  alt="Preview" 
+                  fill 
+                  className="object-cover" 
+                  unoptimized 
                 />
               </div>
             )}
