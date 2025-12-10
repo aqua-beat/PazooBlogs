@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -28,6 +29,9 @@ type Post struct {
 	Caption  string `json:"caption"`
 }
 
+// JWTの署名に使う鍵
+var jwtSecret = []byte("your_secret_key_pazooblogs")
+
 func main() {
 	// DB接続
 	dsn := "root:@tcp(127.0.0.1:3306)/pazooblogs_db?charset=utf8mb4&parseTime=True&loc=Local"
@@ -44,8 +48,8 @@ func main() {
 	// CORS設定
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
-		AllowHeaders:     []string{"Origin", "Content-Type"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
@@ -59,42 +63,80 @@ func main() {
 
 	// --- API ルーティング ---
 
-	// 1. ユーザー登録 API
+	// ユーザー登録 API
 	r.POST("/api/signup", func(c *gin.Context) {
 		var user User
-		// フロントから送られてきたJSON (username, password) を読み込む
 		if err := c.ShouldBindJSON(&user); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "データ形式が正しくありません"})
 			return
 		}
 
-		// パスワードを暗号化 (ハッシュ化)
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "パスワードの暗号化に失敗しました"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "サーバーエラー"})
 			return
 		}
 		user.Password = string(hashedPassword)
 
-		// DBに保存
-		result := db.Create(&user)
-		if result.Error != nil {
-			// 重複エラーなどの場合
-			c.JSON(http.StatusBadRequest, gin.H{"error": "このユーザー名は既に使用されています"})
+		if result := db.Create(&user); result.Error != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ユーザー名が既に使用されています"})
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "ユーザー登録が完了しました"})
 	})
 
-	// 2. 投稿一覧 API
+	// ログイン
+	r.POST("/api/login", func(c *gin.Context) {
+		var input User // ユーザーからの入力 (username, password)
+		var user User  // DBから取得するユーザー情報
+
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "データ形式が正しくありません"})
+			return
+		}
+
+		// ユーザー名でDB検索
+		if err := db.Where("username = ?", input.Username).First(&user).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "ユーザー名またはパスワードが間違っています"})
+			return
+		}
+
+		// パスワード照合
+		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "ユーザー名またはパスワードが間違っています"})
+			return
+		}
+
+		// JWTトークンの生成
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub":      user.ID,                               // ユーザーID
+			"username": user.Username,                         // ユーザー名
+			"exp":      time.Now().Add(time.Hour * 24).Unix(), // 有効期限: 24時間
+		})
+
+		tokenString, err := token.SignedString(jwtSecret)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "トークン生成エラー"})
+			return
+		}
+
+		// トークンを返す
+		c.JSON(http.StatusOK, gin.H{
+			"token":    tokenString,
+			"username": user.Username,
+			"user_id":  user.ID,
+		})
+	})
+
+	// 投稿一覧 API
 	r.GET("/api/posts", func(c *gin.Context) {
 		var posts []Post
 		db.Order("created_at desc").Find(&posts)
 		c.JSON(http.StatusOK, posts)
 	})
 
-	// 3. 新規投稿 API
+	// 新規投稿 API
 	r.POST("/api/posts", func(c *gin.Context) {
 		caption := c.PostForm("caption")
 		file, err := c.FormFile("image")

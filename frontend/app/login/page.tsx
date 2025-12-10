@@ -6,36 +6,47 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Quicksand } from "next/font/google";
 
+// フォント設定
 const quicksand = Quicksand({ subsets: ["latin"] });
 
-export default function Signup() {
+export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const router = useRouter();
 
-  const handleSignup = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      // Goサーバーの登録APIを叩く
-      await axios.post("http://localhost:8080/api/signup", {
+      // ログインAPIを叩く
+      const res = await axios.post("http://localhost:8080/api/login", {
         username: username,
         password: password,
       });
 
-      alert("登録が完了しました！");
-      router.push("/"); // ひとまずホームに戻る
+      // 成功したら、トークンをブラウザ(localStorage)に保存
+      localStorage.setItem("token", res.data.token);
+      localStorage.setItem("username", res.data.username);
+      localStorage.setItem("user_id", res.data.user_id);
+
+      alert("ログインしました！");
+      router.push("/"); // ホームへ移動
     } catch (err) {
       console.error(err);
-      alert("登録に失敗しました（ユーザー名が重複している可能性があります）");
+      alert("ログインに失敗しました。ユーザー名かパスワードが間違っています。");
     }
   };
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="max-w-sm w-full bg-white p-8 rounded-lg shadow-md border">
-        <h1 className={`${quicksand.className} text-3xl font-bold text-center mb-8 text-gray-700`}>PazooBlogs</h1>
+        {/* タイトル */}
+        <h1
+          className={`${quicksand.className} text-3xl font-bold text-center mb-8 text-gray-700`}
+        >
+          PazooBlogs
+        </h1>
 
-        <form onSubmit={handleSignup} className="flex flex-col gap-4">
+        <form onSubmit={handleLogin} className="flex flex-col gap-4">
           <div>
             <input
               type="text"
@@ -62,14 +73,16 @@ export default function Signup() {
             type="submit"
             className="w-full bg-blue-500 text-white font-bold py-2 rounded hover:bg-blue-600 transition"
           >
-            登録する
+            ログイン
           </button>
         </form>
 
         <div className="mt-8 text-center text-sm">
           <p className="text-gray-500">
-            すでにアカウントをお持ちですか？ <br />
-            <Link href="/login" className="text-blue-500 font-bold">ログインする</Link>
+            アカウントをお持ちでないですか？ <br />
+            <Link href="/signup" className="text-blue-500 font-bold">
+              登録する
+            </Link>
           </p>
         </div>
       </div>

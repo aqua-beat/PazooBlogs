@@ -41,7 +41,3 @@ go mod tidy
 
 # サーバー起動 (ポート 8080)
 go run main.go
-
-### 3. サーバ起動
-front. npm run dev
-back.  go run main.go
