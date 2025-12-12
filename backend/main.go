@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -27,6 +28,8 @@ type Post struct {
 	gorm.Model
 	ImageURL string `json:"image_url"`
 	Caption  string `json:"caption"`
+	UserID   uint   `json:"user_id"`
+	Username string `json:"username"`
 }
 
 // JWTの署名に使う鍵
@@ -82,7 +85,6 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "ユーザー名が既に使用されています"})
 			return
 		}
-
 		c.JSON(http.StatusOK, gin.H{"message": "ユーザー登録が完了しました"})
 	})
 
@@ -138,6 +140,29 @@ func main() {
 
 	// 新規投稿 API
 	r.POST("/api/posts", func(c *gin.Context) {
+		// Authorizationヘッダーからトークンを取り出す
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "ログインしてください"})
+			return
+		}
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+		// トークンを検証
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			return jwtSecret, nil
+		})
+
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "無効なトークンです"})
+			return
+		}
+
+		claims, _ := token.Claims.(jwt.MapClaims)
+		userID := uint(claims["sub"].(float64))
+		username := claims["username"].(string)
+
+		// 画像とキャプションの取得
 		caption := c.PostForm("caption")
 		file, err := c.FormFile("image")
 		if err != nil {
@@ -149,17 +174,47 @@ func main() {
 		savePath := filepath.Join("./uploads", filename)
 
 		if err := c.SaveUploadedFile(file, savePath); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "画像の保存に失敗しました"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失敗"})
 			return
 		}
 
+		// DBに保存 (ユーザー情報付き)
 		post := Post{
 			ImageURL: "/uploads/" + filename,
 			Caption:  caption,
+			UserID:   userID,
+			Username: username,
 		}
 		db.Create(&post)
-
 		c.JSON(http.StatusOK, post)
+	})
+
+	// 自分の投稿一覧取得API
+	r.GET("/api/me/posts", func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		// トークン検証
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "ログインしてください"})
+			return
+		}
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			return jwtSecret, nil
+		})
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "無効なトークンです"})
+			return
+		}
+
+		// ユーザーID取得
+		claims, _ := token.Claims.(jwt.MapClaims)
+		userID := uint(claims["sub"].(float64))
+
+		// そのユーザーの投稿だけをDBから検索
+		var posts []Post
+		db.Where("user_id = ?", userID).Order("created_at desc").Find(&posts)
+
+		c.JSON(http.StatusOK, posts)
 	})
 
 	r.Run(":8080")

@@ -14,6 +14,7 @@ type Post = {
   ID: number;
   image_url: string;
   caption: string;
+  username?: string;
 };
 
 export default function Home() {
@@ -80,8 +81,14 @@ export default function Home() {
     formData.append("image", file);
 
     try {
+      // トークンを取得
+      const token = localStorage.getItem("token");
+
       await axios.post("http://localhost:8080/api/posts", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+        headers: {
+          "Content-Type": "multipart/form-data",
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       // 送信成功後のリセット処理
@@ -115,9 +122,9 @@ export default function Home() {
         <div className="flex gap-4 text-sm font-bold">
           {isLoggedIn ? (
             <div className="flex items-center gap-4">
-              <span className="text-gray-500 hidden sm:block">
+              <Link href="/profile" className="text-gray-500 hidden sm:block hover:text-blue-500 transition cursor-pointer">
                 こんにちは, {username}さん
-              </span>
+              </Link>
               <button
                 onClick={handleLogout}
                 className="text-red-500 hover:text-red-700 transition"
@@ -214,7 +221,7 @@ export default function Home() {
               <div className="p-3 flex items-center gap-2">
                 <div className="w-8 h-8 bg-gray-200 rounded-full"></div>
                 <span className="font-bold text-sm text-black">
-                  User_{post.ID}
+                  {post.username || "名無し"}
                 </span>
               </div>
 
@@ -236,7 +243,7 @@ export default function Home() {
                   <button>💬</button>
                 </div>
                 <p className="text-sm text-black">
-                  <span className="font-bold mr-2">User_{post.ID}</span>
+                  <span className="font-bold mr-2">{post.username || "名無し"}</span>
                   {post.caption}
                 </p>
               </div>
