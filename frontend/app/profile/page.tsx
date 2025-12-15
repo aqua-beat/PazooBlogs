@@ -45,6 +45,27 @@ export default function Profile() {
     init();
   }, []);
 
+  const handleDelete = async (postId: number, e: React.MouseEvent) => {
+    // 親要素へのクリック伝播を止める
+    e.stopPropagation();
+
+    if (!confirm("本当にこの投稿を削除しますか？")) return;
+
+    try {
+      const token = localStorage.getItem("token");
+      await axios.delete(`http://localhost:8080/api/posts/${postId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      // 画面からも消す
+      setPosts(posts.filter((post) => post.ID !== postId));
+      alert("削除しました");
+    } catch (err) {
+      console.error("削除エラー", err);
+      alert("削除に失敗しました");
+    }
+  };
+
   return (
     <main className="min-h-screen bg-white pb-20">
       {/* ヘッダー */}
@@ -91,7 +112,7 @@ export default function Profile() {
           {posts.map((post) => (
             <div
               key={post.ID}
-              className="bg-white border rounded-lg overflow-hidden shadow-sm"
+              className="bg-white border rounded-lg overflow-hidden shadow-sm relative group"
             >
               {/* 投稿ヘッダー */}
               <div className="p-3 flex items-center gap-2">
@@ -110,6 +131,14 @@ export default function Profile() {
                   className="w-full h-auto"
                   unoptimized
                 />
+
+                <button
+                  onClick={(e) => handleDelete(post.ID, e)}
+                  className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600"
+                  title="削除する"
+                >
+                  🗑️
+                </button>
               </div>
 
               {/* キャプション・アクション部分 */}

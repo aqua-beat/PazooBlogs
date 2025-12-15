@@ -23,13 +23,23 @@ type User struct {
 	Password string `json:"password"`
 }
 
+// Like モデル
+type Like struct {
+	ID        uint `gorm:"primarykey"`
+	UserID    uint
+	PostID    uint
+	CreatedAt time.Time
+}
+
 // Post モデル
 type Post struct {
 	gorm.Model
-	ImageURL string `json:"image_url"`
-	Caption  string `json:"caption"`
-	UserID   uint   `json:"user_id"`
-	Username string `json:"username"`
+	ImageURL  string `json:"image_url"`
+	Caption   string `json:"caption"`
+	UserID    uint   `json:"user_id"`
+	Username  string `json:"username"`
+	LikeCount int64  `json:"like_count" gorm:"-"`
+	IsLiked   bool   `json:"is_liked" gorm:"-"`
 }
 
 // JWTの署名に使う鍵
@@ -43,8 +53,8 @@ func main() {
 		panic("データベースへの接続に失敗しました")
 	}
 
-	// マイグレーション（UserテーブルとPostテーブルを作成）
-	db.AutoMigrate(&User{}, &Post{})
+	// マイグレーション
+	db.AutoMigrate(&User{}, &Post{}, &Like{})
 
 	r := gin.Default()
 
@@ -63,6 +73,23 @@ func main() {
 		os.Mkdir("./uploads", 0755)
 	}
 	r.Static("/uploads", "./uploads")
+
+	// ユーザーID取得ヘルパー
+	getUserID := func(c *gin.Context) uint {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			return 0
+		}
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			return jwtSecret, nil
+		})
+		if token != nil && token.Valid {
+			claims, _ := token.Claims.(jwt.MapClaims)
+			return uint(claims["sub"].(float64))
+		}
+		return 0
+	}
 
 	// --- API ルーティング ---
 
@@ -133,33 +160,37 @@ func main() {
 
 	// 投稿一覧 API
 	r.GET("/api/posts", func(c *gin.Context) {
+		userID := getUserID(c)
 		var posts []Post
 		db.Order("created_at desc").Find(&posts)
+
+		for i := range posts {
+			var count int64
+			db.Model(&Like{}).Where("post_id = ?", posts[i].ID).Count(&count)
+			posts[i].LikeCount = count
+			if userID > 0 {
+				var like Like
+				if err := db.Where("user_id = ? AND post_id = ?", userID, posts[i].ID).First(&like).Error; err == nil {
+					posts[i].IsLiked = true
+				}
+			}
+		}
 		c.JSON(http.StatusOK, posts)
 	})
 
 	// 新規投稿 API
 	r.POST("/api/posts", func(c *gin.Context) {
-		// Authorizationヘッダーからトークンを取り出す
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		userID := getUserID(c)
+		if userID == 0 {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "ログインしてください"})
 			return
 		}
+
+		// ユーザー名取得
+		authHeader := c.GetHeader("Authorization")
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
-		// トークンを検証
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			return jwtSecret, nil
-		})
-
-		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "無効なトークンです"})
-			return
-		}
-
+		token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) { return jwtSecret, nil })
 		claims, _ := token.Claims.(jwt.MapClaims)
-		userID := uint(claims["sub"].(float64))
 		username := claims["username"].(string)
 
 		// 画像とキャプションの取得
@@ -191,30 +222,72 @@ func main() {
 
 	// 自分の投稿一覧取得API
 	r.GET("/api/me/posts", func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
+		userID := getUserID(c)
 		// トークン検証
-		if authHeader == "" {
+		if userID == 0 {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "ログインしてください"})
 			return
 		}
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			return jwtSecret, nil
-		})
-		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "無効なトークンです"})
-			return
-		}
 
-		// ユーザーID取得
-		claims, _ := token.Claims.(jwt.MapClaims)
-		userID := uint(claims["sub"].(float64))
-
-		// そのユーザーの投稿だけをDBから検索
 		var posts []Post
 		db.Where("user_id = ?", userID).Order("created_at desc").Find(&posts)
 
+		for i := range posts {
+			var count int64
+			db.Model(&Like{}).Where("post_id = ?", posts[i].ID).Count(&count)
+			posts[i].LikeCount = count
+			var like Like
+			if err := db.Where("user_id = ? AND post_id = ?", userID, posts[i].ID).First(&like).Error; err == nil {
+				posts[i].IsLiked = true
+			}
+		}
 		c.JSON(http.StatusOK, posts)
+	})
+
+	// 投稿削除
+	r.DELETE("/api/posts/:id", func(c *gin.Context) {
+		userID := getUserID(c)
+		if userID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "ログインしてください"})
+			return
+		}
+		postID := c.Param("id")
+
+		var post Post
+		if err := db.Where("id = ? AND user_id = ?", postID, userID).First(&post).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "権限がありません"})
+			return
+		}
+		// 画像ファイル削除
+		if len(post.ImageURL) > 0 {
+			filePath := "." + post.ImageURL
+			os.Remove(filePath)
+		}
+		db.Delete(&post)
+		c.JSON(http.StatusOK, gin.H{"message": "削除しました"})
+	})
+
+	// いいね切り替え (Toggle)
+	r.POST("/api/posts/:id/like", func(c *gin.Context) {
+		userID := getUserID(c)
+		if userID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "ログインしてください"})
+			return
+		}
+		postID := c.Param("id")
+
+		var like Like
+		if err := db.Where("user_id = ? AND post_id = ?", userID, postID).First(&like).Error; err == nil {
+			// 既にしているので解除
+			db.Delete(&like)
+			c.JSON(http.StatusOK, gin.H{"liked": false})
+		} else {
+			// 新規作成
+			var pID uint
+			fmt.Sscanf(postID, "%d", &pID)
+			db.Create(&Like{UserID: userID, PostID: pID})
+			c.JSON(http.StatusOK, gin.H{"liked": true})
+		}
 	})
 
 	r.Run(":8080")

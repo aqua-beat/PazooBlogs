@@ -15,6 +15,8 @@ type Post = {
   image_url: string;
   caption: string;
   username?: string;
+  like_count: number;
+  is_liked: boolean;
 };
 
 export default function Home() {
@@ -41,6 +43,7 @@ export default function Home() {
 
       // 投稿データの取得
       try {
+        const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};  // いいね状態を取得するため
         const res = await axios.get("http://localhost:8080/api/posts");
         setPosts(res.data);
       } catch (err) {
@@ -59,7 +62,7 @@ export default function Home() {
     setIsLoggedIn(false);
     setUsername("");
     alert("ログアウトしました");
-    router.refresh(); // 画面リフレッシュ
+    window.location.reload();
   };
 
   // 画像ファイルが選択された時の処理
@@ -96,8 +99,10 @@ export default function Home() {
       setFile(null);
       setPreview("");
 
-      // 投稿後にリストを再取得（ここでも axios を直接呼ぶ）
-      const res = await axios.get("http://localhost:8080/api/posts");
+      // 投稿後にリストを再取得
+      const res = await axios.get("http://localhost:8080/api/posts", {
+        headers: { Authorization: 'Bearer ${token'}
+      });
       setPosts(res.data);
 
       alert("投稿しました！");
@@ -106,6 +111,9 @@ export default function Home() {
       alert("投稿に失敗しました");
     }
   };
+
+  // 追加: いいね機能
+  
 
   return (
     <main className="min-h-screen bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 pb-20">
