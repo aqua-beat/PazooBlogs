@@ -19,8 +19,9 @@ import (
 // User モデル (ユーザー情報)
 type User struct {
 	gorm.Model
-	Username string `json:"username" gorm:"unique"` // 重複禁止
-	Password string `json:"password"`
+	Username  string `json:"username" gorm:"unique"`
+	Password  string `json:"password"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 // Like モデル
@@ -44,13 +45,14 @@ type Comment struct {
 // Post モデル
 type Post struct {
 	gorm.Model
-	ImageURL  string    `json:"image_url"`
-	Caption   string    `json:"caption"`
-	UserID    uint      `json:"user_id"`
-	Username  string    `json:"username"`
-	LikeCount int64     `json:"like_count" gorm:"-"`
-	IsLiked   bool      `json:"is_liked" gorm:"-"`
-	Comments  []Comment `json:"comments" gorm:"-"`
+	ImageURL   string    `json:"image_url"`
+	Caption    string    `json:"caption"`
+	UserID     uint      `json:"user_id"`
+	Username   string    `json:"username"`
+	UserAvatar string    `json:"user_avatar" gorm:"-"`
+	LikeCount  int64     `json:"like_count" gorm:"-"`
+	IsLiked    bool      `json:"is_liked" gorm:"-"`
+	Comments   []Comment `json:"comments" gorm:"-"`
 }
 
 // JWTの署名に使う鍵
@@ -111,14 +113,12 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "データ形式が正しくありません"})
 			return
 		}
-
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "サーバーエラー"})
 			return
 		}
 		user.Password = string(hashedPassword)
-
 		if result := db.Create(&user); result.Error != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "ユーザー名が既に使用されています"})
 			return
@@ -162,9 +162,10 @@ func main() {
 
 		// トークンを返す
 		c.JSON(http.StatusOK, gin.H{
-			"token":    tokenString,
-			"username": user.Username,
-			"user_id":  user.ID,
+			"token":      tokenString,
+			"username":   user.Username,
+			"user_id":    user.ID,
+			"avatar_url": user.AvatarURL,
 		})
 	})
 
@@ -175,6 +176,11 @@ func main() {
 		db.Order("created_at desc").Find(&posts)
 
 		for i := range posts {
+			// 投稿者のアバターを取得
+			var author User
+			db.First(&author, posts[i].UserID)
+			posts[i].UserAvatar = author.AvatarURL
+
 			var count int64
 			db.Model(&Like{}).Where("post_id = ?", posts[i].ID).Count(&count)
 			posts[i].LikeCount = count
@@ -184,7 +190,6 @@ func main() {
 					posts[i].IsLiked = true
 				}
 			}
-
 			// コメント情報 (最大3件くらい取得して返す)
 			var comments []Comment
 			db.Where("post_id = ?", posts[i].ID).Order("created_at asc").Find(&comments)
@@ -215,7 +220,6 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "画像が必要です"})
 			return
 		}
-
 		filename := fmt.Sprintf("%d_%s", time.Now().Unix(), file.Filename)
 		savePath := filepath.Join("./uploads", filename)
 
@@ -223,7 +227,6 @@ func main() {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失敗"})
 			return
 		}
-
 		// DBに保存 (ユーザー情報付き)
 		post := Post{
 			ImageURL: "/uploads/" + filename,
@@ -257,6 +260,36 @@ func main() {
 			}
 		}
 		c.JSON(http.StatusOK, posts)
+	})
+
+	// アバター画像アップロードAPI
+	r.POST("/api/me/avatar", func(c *gin.Context) {
+		userID := getUserID(c)
+		if userID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "ログインしてください"})
+			return
+		}
+
+		file, err := c.FormFile("avatar")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "画像が必要です"})
+			return
+		}
+
+		// ファイル名を「avatar_ユーザーID_時間.jpg」にして保存
+		filename := fmt.Sprintf("avatar_%d_%d%s", userID, time.Now().Unix(), filepath.Ext(file.Filename))
+		savePath := filepath.Join("./uploads", filename)
+
+		if err := c.SaveUploadedFile(file, savePath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失敗"})
+			return
+		}
+
+		// ユーザー情報の更新
+		avatarURL := "/uploads/" + filename
+		db.Model(&User{}).Where("id = ?", userID).Update("avatar_url", avatarURL)
+
+		c.JSON(http.StatusOK, gin.H{"avatar_url": avatarURL})
 	})
 
 	// 投稿削除
@@ -305,7 +338,7 @@ func main() {
 		}
 	})
 
-	// コメント投稿 (新規追加)
+	// コメント投稿
 	r.POST("/api/posts/:id/comments", func(c *gin.Context) {
 		userID := getUserID(c)
 		if userID == 0 {
