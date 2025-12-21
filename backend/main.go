@@ -31,15 +31,26 @@ type Like struct {
 	CreatedAt time.Time
 }
 
+// Comment モデル
+type Comment struct {
+	ID        uint      `json:"id" gorm:"primarykey"`
+	PostID    uint      `json:"post_id"`
+	UserID    uint      `json:"user_id"`
+	Username  string    `json:"username"`
+	Text      string    `json:"text"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Post モデル
 type Post struct {
 	gorm.Model
-	ImageURL  string `json:"image_url"`
-	Caption   string `json:"caption"`
-	UserID    uint   `json:"user_id"`
-	Username  string `json:"username"`
-	LikeCount int64  `json:"like_count" gorm:"-"`
-	IsLiked   bool   `json:"is_liked" gorm:"-"`
+	ImageURL  string    `json:"image_url"`
+	Caption   string    `json:"caption"`
+	UserID    uint      `json:"user_id"`
+	Username  string    `json:"username"`
+	LikeCount int64     `json:"like_count" gorm:"-"`
+	IsLiked   bool      `json:"is_liked" gorm:"-"`
+	Comments  []Comment `json:"comments" gorm:"-"`
 }
 
 // JWTの署名に使う鍵
@@ -54,7 +65,7 @@ func main() {
 	}
 
 	// マイグレーション
-	db.AutoMigrate(&User{}, &Post{}, &Like{})
+	db.AutoMigrate(&User{}, &Post{}, &Like{}, &Comment{})
 
 	r := gin.Default()
 
@@ -143,7 +154,6 @@ func main() {
 			"username": user.Username,                         // ユーザー名
 			"exp":      time.Now().Add(time.Hour * 24).Unix(), // 有効期限: 24時間
 		})
-
 		tokenString, err := token.SignedString(jwtSecret)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "トークン生成エラー"})
@@ -174,6 +184,11 @@ func main() {
 					posts[i].IsLiked = true
 				}
 			}
+
+			// コメント情報 (最大3件くらい取得して返す)
+			var comments []Comment
+			db.Where("post_id = ?", posts[i].ID).Order("created_at asc").Find(&comments)
+			posts[i].Comments = comments
 		}
 		c.JSON(http.StatusOK, posts)
 	})
@@ -288,6 +303,45 @@ func main() {
 			db.Create(&Like{UserID: userID, PostID: pID})
 			c.JSON(http.StatusOK, gin.H{"liked": true})
 		}
+	})
+
+	// コメント投稿 (新規追加)
+	r.POST("/api/posts/:id/comments", func(c *gin.Context) {
+		userID := getUserID(c)
+		if userID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "ログインしてください"})
+			return
+		}
+		postID := c.Param("id")
+
+		// ユーザー名取得
+		authHeader := c.GetHeader("Authorization")
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) { return jwtSecret, nil })
+		claims, _ := token.Claims.(jwt.MapClaims)
+		username := claims["username"].(string)
+
+		// リクエストボディからコメント内容を取得
+		type CommentInput struct {
+			Text string `json:"text"`
+		}
+		var input CommentInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "コメントを入力してください"})
+			return
+		}
+
+		var pID uint
+		fmt.Sscanf(postID, "%d", &pID)
+
+		comment := Comment{
+			PostID:   pID,
+			UserID:   userID,
+			Username: username,
+			Text:     input.Text,
+		}
+		db.Create(&comment)
+		c.JSON(http.StatusOK, comment)
 	})
 
 	r.Run(":8080")

@@ -121,17 +121,16 @@ export default function Profile() {
               </div>
 
               {/* 画像部分 */}
-              <div className="relative w-full">
+              <div className="relative w-full h-96 bg-gray-100">
                 <Image
                   src={`http://localhost:8080${post.image_url}`}
                   alt={post.caption}
-                  width={0}
-                  height={0}
-                  sizes="100vw"
-                  className="w-full h-auto"
+                  fill
+                  className="object-cover"
                   unoptimized
                 />
 
+                {/* 削除ボタン */}
                 <button
                   onClick={(e) => handleDelete(post.ID, e)}
                   className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600"
